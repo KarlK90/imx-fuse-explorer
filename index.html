@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>Fuse Bank Explorer</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/vue/3.5.17/vue.global.prod.min.js"
+    integrity="sha512-B+xT9hBEokScoEYqF2L6zjF/R0mtYb11XURk2ERx89eRofWtgsrCljvx30JospRZRI3v19p9pRWvmLQ6ySS9FA=="
+    crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/fuse.js/7.1.0/fuse.min.js"
+    integrity="sha512-H1bWCnc4dDJwdioqpOCkU76ZxEdvBvOy9R9Dd9EqftlzQg92owjX5IVdiOw00llAyQFUZJNPrzDnWZ/lZtf25A=="
+    crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/modern-normalize/3.0.1/modern-normalize.min.css"
+    integrity="sha512-q6WgHqiHlKyOqslT/lgBgodhd03Wp4BEqKeW6nNtlOY4quzyG3VoQKFrieaCeSnuVseNKRGpGeDU3qPmabCANg=="
+    crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <style>
+    body {
+      font-family: sans-serif;
+      background: #f4f4f4;
+      padding: 1rem;
+    }
+
+    input,
+    button,
+    select {
+      padding: 0.5rem;
+      margin-bottom: 0.5rem;
+    }
+
+    label.inline {
+      display: inline-block;
+      margin-right: 1rem;
+    }
+
+    table {
+      border-collapse: collapse;
+      background: white;
+    }
+
+    th,
+    td {
+      border: 1px solid #ccc;
+      padding: 0.5rem;
+    }
+
+    th {
+      background: #eee;
+    }
+
+    tr:hover {
+      background-color: #f1f1f1;
+    }
+
+    .register-header {
+      cursor: pointer;
+      background: #ddeeff;
+    }
+
+    .bitfield-row {
+      background: #fafafa;
+    }
+
+    .bitfield-position {
+      font-family: monospace;
+    }
+
+    .fuse-meta {
+      font-size: 0.85em;
+      color: #555;
+    }
+
+    .full-width {
+      width: 100%;
+    }
+
+    .no-padding {
+      padding: 0;
+    }
+
+    .drop-zone {
+      border: 2px dashed #aaa;
+      padding: 1rem;
+      text-align: center;
+      color: #666;
+      margin-bottom: 1rem;
+    }
+
+    .drop-zone.dragover {
+      background: #eef;
+    }
+
+    .file-toggle {
+      background: #ccc;
+      cursor: pointer;
+      padding: 0.25rem 0.5rem;
+      margin-bottom: 0.5rem;
+      display: inline-block;
+      border-radius: 4px;
+      width: 100%;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="app">
+    <h1>Fuse Bank Explorer - {{ selectedCpu }}</h1>
+
+    <button class="full-width" :disabled="!dirSupported"
+      :title="dirSupported ? '' : 'File System Access API not supported in this browser'" @click="loadFromDirectory">
+      Select Directory with fuses.json files
+    </button>
+    <button class="full-width" @click="resetLocalStorage">Reset Local Storage</button>
+
+    <div class="drop-zone" @dragover.prevent="dragOver = true" @dragleave.prevent="dragOver = false"
+      @drop.prevent="handleDrop" :class="{ dragover: dragOver }">
+      Drag and drop one or more fuses.json files here
+    </div>
+
+    <label for="fileSelect">Select File(s)</label>
+    <select class="full-width" id="fileSelect" v-model="selectedFiles" multiple size="10">
+      <option v-for="(info, label) in fileInfo" :value="label">{{ info.cpu }} - {{ label }}</option>
+    </select>
+
+    <label for="query">Search</label>
+    <input id="query" class="full-width" v-model="query" placeholder="Search fuses, bitfields, or descriptions..."
+      @input="saveState">
+
+    <div class="inline">
+      <label class="inline">Only show matching bitfields: <input class="inline" style="width: auto" type="checkbox"
+          v-model="filterBitfields"></label>
+      <label class="inline">Threshold: <input type="number" step="0.05" min="0" max="1" v-model.number="fuseThreshold"
+          style="width: 5rem"></label>
+    </div>
+
+    <div style="margin-bottom: 0.5rem;" v-for="label in selectedFiles" :key="label">
+      <div class="file-toggle" @click="fileCollapsed[label] = !fileCollapsed[label]">
+        {{ fileInfo[label]?.cpu }} - {{ label }}
+        <span v-if="fileCollapsed[label]">▶</span>
+        <span v-else>▼</span>
+      </div>
+      <table class="full-width no-padding" v-if="!fileCollapsed[label]">
+        <thead>
+          <tr>
+            <th>Index</th>
+            <th>Bank</th>
+            <th>Word</th>
+            <th>Name</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template v-for="entry in filteredEntriesByFile[label] || []" :key="entry.register.id">
+            <tr class="register-header" @click="entry.expanded = !entry.expanded">
+              <td>{{ entry.register.index }}</td>
+              <td
+                :title="entry.register.bank ? '' : 'Bankwidth must be known for computation add CPU\'s bankwidth to file'">
+                {{ entry.register.bank ?? "Unknown for " + fileInfo[label]?.cpu }}</td>
+              <td
+                :title="entry.register.word ? '' : 'Bankwidth must be known for computation add CPU\'s bankwidth to file'">
+                {{ entry.register.word ?? "Unknown for " + fileInfo[label]?.cpu }}</td>
+              <td>{{ entry.register.name }}</td>
+            </tr>
+            <tr v-if="entry.expanded && filteredBitfields(entry.register.bitfields).length" class="bitfield-row">
+              <td class="no-padding" colspan="4">
+                <table class="full-width no-padding">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Position (Width)</th>
+                      <th>Name</th>
+                      <th>Description</th>
+                      <th>Values</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="(bitfield, i) in filteredBitfields(entry.register.bitfields)" :key="bitfield.id">
+                      <td>{{ i }}</td>
+                      <td class="bitfield-position"
+                        title="Position is computed from width of all bitfields, double check against datasheet if possible!">
+                        <template v-if="bitfield.width > 1">
+                          [{{ bitfield.position + bitfield.width - 1 }}:{{ bitfield.position }}] ({{ bitfield.width }})
+                        </template>
+                        <template v-else>
+                          [{{ bitfield.position }}] ({{ bitfield.width }})
+                        </template>
+                      </td>
+                      <td>{{ bitfield.name || 'Reserved' }}</td>
+                      <td>{{ bitfield.description }}</td>
+                      <td class="no-padding">
+                        <table class="full-width" v-if="bitfield.values && bitfield.values.length">
+                          <thead>
+                            <tr>
+                              <th>Name</th>
+                              <th>Value</th>
+                              <th>Description</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr v-for="val in bitfield.values" :key="val.name">
+                              <td>{{ val.name }}</td>
+                              <td>{{ val.value }}</td>
+                              <td>{{ val.description }}</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+
+  </div>
+
+  <script>
+    const { createApp } = Vue;
+
+    createApp({
+      data() {
+        return {
+          allEntries: {},
+          fileInfo: {},
+          selectedFiles: JSON.parse(localStorage.getItem('fuse_selectedFiles') || '[]'),
+          query: localStorage.getItem('fuse_query') || '',
+          fuseThreshold: parseFloat(localStorage.getItem('fuse_threshold') || '0.4'),
+          filterBitfields: false,
+          dirSupported: 'showDirectoryPicker' in window,
+          dragOver: false,
+          fileCollapsed: {},
+          knownBankwidth: {
+            'MIMX91': 8,
+            'MIMX9352': 8,
+            'MIMX9596': 8
+          }
+        };
+      },
+      mounted() {
+        // Load persisted files from localStorage
+        for (const label of this.selectedFiles) {
+          const storedData = localStorage.getItem(`fuse_data_${label}`);
+          if (storedData) {
+            const parsedData = JSON.parse(storedData);
+            this.allEntries[label] = parsedData.entries;
+            this.fileInfo[label] = parsedData.info;
+            if (!(label in this.fileCollapsed)) this.fileCollapsed[label] = false;
+          }
+        }
+      },
+      computed: {
+        filteredEntriesByFile() {
+          const result = {};
+          for (const [fileLabel, entries] of Object.entries(this.allEntries)) {
+            if (!this.query.trim()) {
+              result[fileLabel] = entries;
+            } else {
+              const fuse = new Fuse(entries, {
+                keys: [
+                  'register.index', 'register.index_int', 'register.bank', 'register.word',
+                  'register.name', 'register.description',
+                  'register.bitfields.name', 'register.bitfields.description',
+                  'register.bitfields.values.name', 'register.bitfields.values.description'
+                ],
+                includeScore: true,
+                threshold: this.fuseThreshold
+              });
+              result[fileLabel] = fuse.search(this.query).map(r => r.item);
+            }
+          }
+          return result;
+        },
+        selectedCpu() {
+          return this.selectedFiles.length === 1 ? this.fileInfo[this.selectedFiles[0]]?.cpu || '' : 'Multiple Files';
+        }
+      },
+      methods: {
+        async loadFromDirectory() {
+          try {
+            const dirHandle = await window.showDirectoryPicker();
+            const files = await this.findFuseFiles(dirHandle);
+            for (const file of files) {
+              const text = await file.handle.getFile().then(f => f.text());
+              this.loadJsonContent(text, file.path);
+            }
+            this.saveState();
+          } catch (err) {
+            console.error('Directory load error:', err);
+          }
+        },
+        async findFuseFiles(dirHandle, files = [], path = '') {
+          for await (const entry of dirHandle.values()) {
+            const fullPath = path + '/' + entry.name;
+            if (entry.kind === 'file' && entry.name === 'fuses.json') {
+              files.push({ name: entry.name, handle: entry, path: fullPath });
+            } else if (entry.kind === 'directory') {
+              await this.findFuseFiles(entry, files, fullPath);
+            }
+          }
+          return files;
+        },
+        async handleDrop(event) {
+          this.dragOver = false;
+          for (const file of event.dataTransfer.files) {
+            if (file.name === 'fuses.json') {
+              const text = await file.text();
+              this.loadJsonContent(text, file.webkitRelativePath || file.name);
+            }
+          }
+          this.saveState();
+        },
+        loadJsonContent(text, label) {
+          try {
+            const data = JSON.parse(text);
+            const flat = [];
+            const bankwidth = this.knownBankwidth[data.cpu.trim()];
+            if (bankwidth === undefined) {
+              console.warn(`Unknown CPU bankwidth for ${data.cpu.trim()}, please add it to knownBankwidth map.`);
+            }
+
+            for (const g of data.groups || []) {
+              for (const reg of g.registers) {
+                reg.index = parseInt(reg.index_int);
+
+                if (bankwidth) {
+                  reg.bank = Math.floor(reg.index / bankwidth);
+                  reg.word = reg.index % bankwidth;
+                }
+
+                let position = 0;
+                for (const bf of reg.bitfields || []) {
+                  bf.position = position;
+                  position += bf.width;
+                }
+                flat.push({ register: reg, expanded: true });
+              }
+            }
+            this.allEntries[label] = flat;
+            this.fileInfo[label] = { cpu: data.cpu };
+            if (!this.selectedFiles.includes(label)) this.selectedFiles.push(label);
+            if (!(label in this.fileCollapsed)) this.fileCollapsed[label] = false;
+
+            // Persist the parsed JSON data in localStorage
+            localStorage.setItem(`fuse_data_${label}`, JSON.stringify({ entries: flat, info: this.fileInfo[label] }));
+
+            this.saveState();
+          } catch (e) {
+            console.error(`Failed to load ${label}`, e);
+          }
+        },
+        filteredBitfields(bitfields) {
+          if (!bitfields || !Array.isArray(bitfields)) return [];
+          if (!this.query.trim() || !this.filterBitfields) return bitfields;
+          const fuse = new Fuse(bitfields, {
+            keys: ['id', 'name', 'description', 'values.name', 'values.description'],
+            includeScore: true,
+            threshold: this.fuseThreshold
+          });
+          return fuse.search(this.query).map(r => r.item);
+        },
+        saveState() {
+          localStorage.setItem('fuse_query', this.query);
+          localStorage.setItem('fuse_selectedFiles', JSON.stringify(this.selectedFiles));
+          localStorage.setItem('fuse_threshold', this.fuseThreshold);
+        },
+        resetLocalStorage() {
+          localStorage.clear();
+          this.allEntries = {};
+          this.fileInfo = {};
+          this.selectedFiles = [];
+          this.query = '';
+          this.fuseThreshold = 0.4;
+          this.filterBitfields = false;
+          this.fileCollapsed = {};
+          console.log('Local storage cleared and app state reset.');
+        }
+      }
+    }).mount('#app');
+  </script>
+</body>
+
+</html>
