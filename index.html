@@ -90,13 +90,12 @@
     }
 
     .file-toggle {
-      background: #ccc;
       cursor: pointer;
-      padding: 0.25rem 0.5rem;
-      margin-bottom: 0.5rem;
-      display: inline-block;
-      border-radius: 4px;
-      width: 100%;
+      text-align: left;
+    }
+
+    .file-toggle .file-path {
+      font-weight: lighter;
     }
   </style>
 </head>
@@ -109,12 +108,13 @@
       :title="dirSupported ? '' : 'File System Access API not supported in this browser'" @click="loadFromDirectory">
       Select Directory with fuses.json files
     </button>
-    <button class="full-width" @click="resetLocalStorage">Reset Local Storage</button>
 
     <div class="drop-zone" @dragover.prevent="dragOver = true" @dragleave.prevent="dragOver = false"
       @drop.prevent="handleDrop" :class="{ dragover: dragOver }">
       Drag and drop one or more fuses.json files here
     </div>
+
+    <button class="full-width" @click="resetLocalStorage">Reset Local Storage</button>
 
     <label for="fileSelect">Select File(s)</label>
     <select class="full-width" id="fileSelect" v-model="selectedFiles" multiple size="10">
@@ -133,24 +133,35 @@
     </div>
 
     <div style="margin-bottom: 0.5rem;" v-for="label in selectedFiles" :key="label">
-      <div class="file-toggle" @click="fileCollapsed[label] = !fileCollapsed[label]">
-        {{ fileInfo[label]?.cpu }} - {{ label }}
-        <span v-if="fileCollapsed[label]">▶</span>
-        <span v-else>▼</span>
-      </div>
-      <table class="full-width no-padding" v-if="!fileCollapsed[label]">
+      <table class="full-width no-padding">
         <thead>
-          <tr>
+          <tr class="file-toggle" @click="fileCollapsed[label] = !fileCollapsed[label]">
+            <th class="full-width" colspan="4">              
+              <h3>
+                <span v-if="fileCollapsed[label]">▸</span>
+                <span v-else>▾</span>
+                {{ fileInfo[label]?.cpu }}
+                <span class="file-path">{{ label }}</span>
+              </h3>
+            </th>
+          </tr>
+          <tr v-if="!fileCollapsed[label]">
             <th>Index</th>
             <th>Bank</th>
             <th>Word</th>
             <th>Name</th>
           </tr>
         </thead>
-        <tbody>
+        <tbody v-if="!fileCollapsed[label]">
           <template v-for="entry in filteredEntriesByFile[label] || []" :key="entry.register.id">
             <tr class="register-header" @click="entry.expanded = !entry.expanded">
-              <td>{{ entry.register.index }}</td>
+              <td>
+                <template v-if="filteredBitfields(entry.register.bitfields).length">
+                  <span v-if="entry.expanded">▾</span>
+                  <span v-else>▸</span>
+                </template>
+                {{ entry.register.index }}
+              </td>
               <td
                 :title="entry.register.bank ? '' : 'Bankwidth must be known for computation add CPU\'s bankwidth to file'">
                 {{ entry.register.bank ?? "Unknown for " + fileInfo[label]?.cpu }}</td>
