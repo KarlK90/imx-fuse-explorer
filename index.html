@@ -3,7 +3,7 @@
 
 <head>
   <meta charset="UTF-8">
-  <title>Fuse Bank Explorer</title>
+  <title>NXP SPSDK - Fuse Bank Explorer</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/vue/3.5.17/vue.global.prod.min.js"
     integrity="sha512-B+xT9hBEokScoEYqF2L6zjF/R0mtYb11XURk2ERx89eRofWtgsrCljvx30JospRZRI3v19p9pRWvmLQ6ySS9FA=="
     crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -64,11 +64,6 @@
       font-family: monospace;
     }
 
-    .fuse-meta {
-      font-size: 0.85em;
-      color: #555;
-    }
-
     .full-width {
       width: 100%;
     }
@@ -102,8 +97,17 @@
 
 <body>
   <div id="app">
-    <h1>Fuse Bank Explorer - {{ selectedCpu }}</h1>
-
+    <h1>NXP SPSDK - Fuse Bank Explorer - {{ selectedCpu }}</h1>
+    <h3>Usage</h3>
+    <p>
+      This tool allows you to explore fuse banks from <a
+        href="https://github.com/nxp-mcuxpresso/spsdk/tree/9259bee2968cfccd5fd3cb22a842c7d105e623fa/spsdk/data/devices">NXP's
+        SPSDK</a>.
+      You can drag and drop multiple fuses.json files, search through them, and view detailed information about each
+      fuse and its bitfields. If your browser supports the File System Access API (Chromeium based browsers), you can
+      also select a
+      directory containing fuses.json files, e.g. the devices folder from spsdk.
+    </p>
     <button class="full-width" :disabled="!dirSupported"
       :title="dirSupported ? '' : 'File System Access API not supported in this browser'" @click="loadFromDirectory">
       Select Directory with fuses.json files
@@ -136,7 +140,7 @@
       <table class="full-width no-padding">
         <thead>
           <tr class="file-toggle" @click="fileCollapsed[label] = !fileCollapsed[label]">
-            <th class="full-width" colspan="4">              
+            <th class="full-width" colspan="4">
               <h3>
                 <span v-if="fileCollapsed[label]">▸</span>
                 <span v-else>▾</span>
