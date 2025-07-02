@@ -212,7 +212,7 @@
                           <tbody>
                             <tr v-for="val in bitfield.values" :key="val.name">
                               <td>{{ val.name }}</td>
-                              <td>{{ val.value }}</td>
+                              <td>{{ '0x' + renderHex(val.value) }}</td>
                               <td>{{ val.description }}</td>
                             </tr>
                           </tbody>
@@ -388,6 +388,10 @@
           this.filterBitfields = false;
           this.fileCollapsed = {};
           console.log('Local storage cleared and app state reset.');
+        },
+        renderHex(value) {
+          let val = parseInt(value)
+          return val.toString(16)
         }
       }
     }).mount('#app');
