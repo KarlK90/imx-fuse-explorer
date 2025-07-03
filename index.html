@@ -114,8 +114,10 @@
     </button>
 
     <div class="drop-zone" @dragover.prevent="dragOver = true" @dragleave.prevent="dragOver = false"
-      @drop.prevent="handleDrop" :class="{ dragover: dragOver }">
-      Drag and drop one or more fuses.json files here
+      @drop.prevent="handleDrop" :class="{ dragover: dragOver }" @click="$refs.fileInput.click()"
+      style="cursor: pointer;">
+      Drag and drop one or more fuses.json files here or click to select file(s)<br>
+      <input type="file" ref="fileInput" style="display: none;" multiple @change="handleFilePicker">
     </div>
 
     <button class="full-width" @click="resetLocalStorage">Reset Local Storage</button>
@@ -320,6 +322,14 @@
             if (file.name === 'fuses.json') {
               const text = await file.text();
               this.loadJsonContent(text, file.webkitRelativePath || file.name);
+            }
+          }
+          this.saveState();
+        },
+        async handleFilePicker(event) {
+          for (const file of event.target.files) {
+            if (file.name === 'fuses.json') {
+              file.text().then(text => this.loadJsonContent(text, file.webkitRelativePath || file.name));
             }
           }
           this.saveState();
