@@ -97,7 +97,7 @@
 
 <body>
   <div id="app">
-    <h1>NXP SPSDK - Fuse Bank Explorer - {{ selectedCpu }}</h1>
+    <h1>NXP SPSDK Fuse Bank Explorer</h1>
     <h3>Usage</h3>
     <p>
       This tool allows you to explore fuse banks from <a
@@ -123,46 +123,47 @@
     <button class="full-width" @click="resetLocalStorage">Reset Local Storage</button>
 
     <label for="fileSelect">Select File(s)</label>
-    <select class="full-width" id="fileSelect" v-model="selectedFiles" multiple size="10">
-      <option v-for="(info, label) in fileInfo" :value="label">{{ info.cpu }} - {{ label }}</option>
+    <select class="full-width" id="fileSelect" v-model="filterParams.filesSelected" multiple size="10"
+      @change="saveState">
+      <option v-for="(info, label) in filesData" :value="label">{{ info.info.cpu }} - {{ label }}</option>
     </select>
 
     <label for="query">Search</label>
-    <input id="query" class="full-width" v-model="query" placeholder="Search fuses, bitfields, or descriptions..."
-      @input="saveState">
+    <input id="query" class="full-width" v-model="filterParams.query"
+      placeholder="Search fuses, bitfields, or descriptions..." @input="saveState">
 
     <div class="inline">
       <label class="inline">Only show matching bitfields: <input class="inline" style="width: auto" type="checkbox"
-          v-model="filterBitfields"></label>
+          v-model="filterParams.onlyBitfields" @change="saveState"></label>
       <label class="inline">Similarity threshold: <input type="number" step="0.05" min="0" max="1"
-          v-model.number="fuseThreshold" style="width: 5rem"></label>
+          v-model.number="filterParams.threshold" style="width: 5rem" @change="saveState"></label>
     </div>
 
-    <div style="margin-bottom: 0.5rem;" v-for="label in selectedFiles" :key="label">
+    <div style="margin-bottom: 0.5rem;" v-for="label in filterParams.filesSelected" :key="label">
       <table class="full-width no-padding">
         <thead>
-          <tr class="file-toggle" @click="fileCollapsed[label] = !fileCollapsed[label]">
+          <tr class="file-toggle" @click="filesData[label].collapsed = !filesData[label]?.collapsed">
             <th class="full-width" colspan="4">
               <h3>
-                <span v-if="fileCollapsed[label]">▸</span>
+                <span v-if="filesData[label]?.collapsed">▸</span>
                 <span v-else>▾</span>
-                {{ fileInfo[label]?.cpu }}
+                {{ filesData[label]?.info.cpu }}
                 <span class="file-path">{{ label }}</span>
               </h3>
             </th>
           </tr>
-          <tr v-if="!fileCollapsed[label]">
+          <tr v-if="!filesData[label]?.collapsed">
             <th>Index</th>
             <th>Bank</th>
             <th>Word</th>
             <th>Name</th>
           </tr>
         </thead>
-        <tbody v-if="!fileCollapsed[label]">
-          <template v-for="entry in filteredEntriesByFile[label] || []" :key="entry.register.id">
+        <tbody v-if="!filesData[label]?.collapsed">
+          <template v-for="entry in getFilteredEntries(filesData[label])" :key="entry.register.id">
             <tr class="register-header" @click="entry.expanded = !entry.expanded">
               <td>
-                <template v-if="filteredBitfields(entry.register.bitfields).length">
+                <template v-if="getFilteredBitfields(entry.register.bitfields).length">
                   <span v-if="entry.expanded">▾</span>
                   <span v-else>▸</span>
                 </template>
@@ -170,13 +171,13 @@
               </td>
               <td
                 :title="entry.register.bank ? '' : 'Bankwidth must be known for computation add CPU\'s bankwidth to file'">
-                {{ entry.register.bank ?? "Unknown for " + fileInfo[label]?.cpu }}</td>
+                {{ entry.register.bank ?? "Unknown for " + filesData[label]?.info.cpu }}</td>
               <td
                 :title="entry.register.word ? '' : 'Bankwidth must be known for computation add CPU\'s bankwidth to file'">
-                {{ entry.register.word ?? "Unknown for " + fileInfo[label]?.cpu }}</td>
+                {{ entry.register.word ?? "Unknown for " + filesData[label]?.info.cpu }}</td>
               <td>{{ entry.register.name }}</td>
             </tr>
-            <tr v-if="entry.expanded && filteredBitfields(entry.register.bitfields).length" class="bitfield-row">
+            <tr v-if="entry.expanded && getFilteredBitfields(entry.register.bitfields).length" class="bitfield-row">
               <td class="no-padding" colspan="4">
                 <table class="full-width no-padding">
                   <thead>
@@ -189,7 +190,7 @@
                     </tr>
                   </thead>
                   <tbody>
-                    <tr v-for="(bitfield, i) in filteredBitfields(entry.register.bitfields)" :key="bitfield.id">
+                    <tr v-for="(bitfield, i) in getFilteredBitfields(entry.register.bitfields)" :key="bitfield.id">
                       <td>{{ i }}</td>
                       <td class="bitfield-position"
                         title="Position is computed from width of all bitfields, double check against datasheet if possible!">
@@ -237,59 +238,21 @@
     createApp({
       data() {
         return {
-          allEntries: {},
-          fileInfo: {},
-          selectedFiles: JSON.parse(localStorage.getItem('fuse_selectedFiles') || '[]'),
-          query: localStorage.getItem('fuse_query') || '',
-          fuseThreshold: parseFloat(localStorage.getItem('fuse_threshold') || '0.4'),
-          filterBitfields: false,
+          filesData: JSON.parse(localStorage.getItem('fuse_filesData') || '{}'),
+          filterParams: JSON.parse(localStorage.getItem('fuse_filterParams')) || {
+            query: '',
+            threshold: 0.4,
+            onlyBitfields: false,
+            filesSelected: []
+          },
           dirSupported: 'showDirectoryPicker' in window,
           dragOver: false,
-          fileCollapsed: {},
           knownBankwidth: {
             'MIMX91': 8,
             'MIMX9352': 8,
             'MIMX9596': 8
           }
         };
-      },
-      mounted() {
-        // Load persisted files from localStorage
-        for (const label of this.selectedFiles) {
-          const storedData = localStorage.getItem(`fuse_data_${label}`);
-          if (storedData) {
-            const parsedData = JSON.parse(storedData);
-            this.allEntries[label] = parsedData.entries;
-            this.fileInfo[label] = parsedData.info;
-            if (!(label in this.fileCollapsed)) this.fileCollapsed[label] = false;
-          }
-        }
-      },
-      computed: {
-        filteredEntriesByFile() {
-          const result = {};
-          for (const [fileLabel, entries] of Object.entries(this.allEntries)) {
-            if (!this.query.trim()) {
-              result[fileLabel] = entries;
-            } else {
-              const fuse = new Fuse(entries, {
-                keys: [
-                  'register.index', 'register.index_int', 'register.bank', 'register.word',
-                  'register.name', 'register.description',
-                  'register.bitfields.name', 'register.bitfields.description',
-                  'register.bitfields.values.name', 'register.bitfields.values.description'
-                ],
-                includeScore: true,
-                threshold: this.fuseThreshold
-              });
-              result[fileLabel] = fuse.search(this.query).map(r => r.item);
-            }
-          }
-          return result;
-        },
-        selectedCpu() {
-          return this.selectedFiles.length === 1 ? this.fileInfo[this.selectedFiles[0]]?.cpu || '' : 'Multiple Files';
-        }
       },
       methods: {
         async loadFromDirectory() {
@@ -300,7 +263,7 @@
               const text = await file.handle.getFile().then(f => f.text());
               this.loadJsonContent(text, file.path);
             }
-            this.saveState();
+            this.saveFiles();
           } catch (err) {
             console.error('Directory load error:', err);
           }
@@ -324,7 +287,7 @@
               this.loadJsonContent(text, file.webkitRelativePath || file.name);
             }
           }
-          this.saveState();
+          this.saveFiles();
         },
         async handleFilePicker(event) {
           for (const file of event.target.files) {
@@ -332,13 +295,14 @@
               file.text().then(text => this.loadJsonContent(text, file.webkitRelativePath || file.name));
             }
           }
-          this.saveState();
+          this.saveFiles();
         },
         loadJsonContent(text, label) {
           try {
             const data = JSON.parse(text);
             const flat = [];
             const bankwidth = this.knownBankwidth[data.cpu.trim()];
+
             if (bankwidth === undefined) {
               console.warn(`Unknown CPU bankwidth for ${data.cpu.trim()}, please add it to knownBankwidth map.`);
             }
@@ -357,52 +321,77 @@
                   bf.position = position;
                   position += bf.width;
                 }
+
                 flat.push({ register: reg, expanded: true });
               }
             }
-            this.allEntries[label] = flat;
-            this.fileInfo[label] = { cpu: data.cpu };
-            if (!this.selectedFiles.includes(label)) this.selectedFiles.push(label);
-            if (!(label in this.fileCollapsed)) this.fileCollapsed[label] = false;
 
-            // Persist the parsed JSON data in localStorage
-            localStorage.setItem(`fuse_data_${label}`, JSON.stringify({ entries: flat, info: this.fileInfo[label] }));
+            this.filesData[label] = { entries: flat, info: { cpu: data.cpu }, collapsed: false };
 
-            this.saveState();
+            if (!this.filterParams.filesSelected.includes(label)) {
+              this.filterParams.filesSelected.push(label);
+            }
           } catch (e) {
             console.error(`Failed to load ${label}`, e);
           }
         },
-        filteredBitfields(bitfields) {
+        getFilteredBitfields(bitfields) {
           if (!bitfields || !Array.isArray(bitfields)) return [];
-          if (!this.query.trim() || !this.filterBitfields) return bitfields;
+
+          if (!this.filterParams.query.trim() || !this.filterParams.onlyBitfields) return bitfields;
+
           const fuse = new Fuse(bitfields, {
             keys: ['id', 'name', 'description', 'values.name', 'values.description'],
             includeScore: true,
-            threshold: this.fuseThreshold
+            threshold: this.filterParams.threshold
           });
-          return fuse.search(this.query).map(r => r.item);
+
+          return fuse.search(this.filterParams.query).map(r => r.item);
+        },
+        getFilteredEntries(fileData) {
+          if (!fileData) {
+            return [];
+          }
+
+          const entries = fileData.entries;
+          if (!this.filterParams.query.trim()) {
+            return entries;
+          }
+
+          const fuse = new Fuse(entries, {
+            keys: [
+              'register.index', 'register.index_int', 'register.bank', 'register.word',
+              'register.name', 'register.description',
+              'register.bitfields.name', 'register.bitfields.description',
+              'register.bitfields.values.name', 'register.bitfields.values.description'
+            ],
+            includeScore: true,
+            threshold: this.filterParams.threshold
+          });
+
+          return fuse.search(this.filterParams.query).map(r => r.item);
         },
         saveState() {
-          localStorage.setItem('fuse_query', this.query);
-          localStorage.setItem('fuse_selectedFiles', JSON.stringify(this.selectedFiles));
-          localStorage.setItem('fuse_threshold', this.fuseThreshold);
+          localStorage.setItem('fuse_filterParams', JSON.stringify(this.filterParams));
+        },
+        saveFiles() {
+          localStorage.setItem('fuse_filesData', JSON.stringify(this.filesData));
         },
         resetLocalStorage() {
           localStorage.clear();
-          this.allEntries = {};
-          this.fileInfo = {};
-          this.selectedFiles = [];
-          this.query = '';
-          this.fuseThreshold = 0.4;
-          this.filterBitfields = false;
-          this.fileCollapsed = {};
+          this.filesData = {};
+          this.filterParams = {
+            query: '',
+            threshold: 0.4,
+            onlyBitfields: false,
+            filesSelected: []
+          };
           console.log('Local storage cleared and app state reset.');
         },
         renderHex(value) {
           let val = parseInt(value)
           return val.toString(16)
-        }
+        },
       }
     }).mount('#app');
   </script>
